@@ -52,7 +52,7 @@ def validate():
     print(f"SAI SỐ TRUNG BÌNH: {avg_err:.2f}%")
     
     if avg_err < 5.0:
-        print("✅ TUYỆT VỜI! Config của bạn đã rất chuẩn.")
+        print("✅ TUYỆT VỜI! Config của bạn đã khá chuẩn.")
     else:
         print("⚠️ Vẫn còn sai số. Hãy kiểm tra lại config.py xem đã copy đúng chưa.")
 
