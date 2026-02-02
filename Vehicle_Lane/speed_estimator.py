@@ -9,7 +9,7 @@ class SpeedEstimator:
         
         # Dictionary lưu lịch sử vị trí: {track_id: [ (x, y, frame_count), ... ]}
         # Chỉ giữ lại buffer ngắn để tính toán
-        self.positions = defaultdict(lambda: deque(maxlen=50))
+        self.positions = defaultdict(lambda: deque(maxlen=60))
         
         # Lưu tốc độ đã tính để hiển thị cho mượt
         self.speeds = {}
@@ -20,14 +20,16 @@ class SpeedEstimator:
         position_bev: Tọa độ (x, y) sau khi đã transform sang Bird-eye view
         """
         self.positions[track_id].append((position_bev, frame_idx))
+
+        sample_gap = int(self.fps / 3) # Lấy mẫu nửa giây
         
         # Cần ít nhất 2 điểm dữ liệu để tính tốc độ
-        if len(self.positions[track_id]) < 5: # Chờ 5 frame cho ổn định
+        if len(self.positions[track_id]) < sample_gap:
             return 0
-            
-        # Lấy điểm hiện tại và điểm cách đây 5 frame (để tránh jitter)
+        
+        # Lấy điểm hiện tại và điểm cách đây sample_gap frame (để tránh jitter)
         current_pos, current_frame = self.positions[track_id][-1]
-        prev_pos, prev_frame = self.positions[track_id][-5] # Lấy mẫu cách nhau 5 frame
+        prev_pos, prev_frame = self.positions[track_id][-sample_gap] # Lấy mẫu cách nhau 5 frame
         
         # Tính khoảng cách Euclidean trong không gian BEV (Pixel)
         distance_pixels = np.linalg.norm(np.array(current_pos) - np.array(prev_pos))
@@ -46,7 +48,7 @@ class SpeedEstimator:
         
         # Smoothing: Lấy trung bình cộng nhẹ để số không nhảy lung tung
         if track_id in self.speeds:
-            self.speeds[track_id] = 0.8 * self.speeds[track_id] + 0.2 * speed_kmh
+            self.speeds[track_id] = 0.95 * self.speeds[track_id] + 0.05 * speed_kmh
         else:
             self.speeds[track_id] = speed_kmh
             
