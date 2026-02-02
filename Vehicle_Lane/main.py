@@ -9,6 +9,12 @@ from transformer import ViewTransformer
 from speed_estimator import SpeedEstimator
 
 def main():
+    device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    if device == 'cpu':
+        print("CẢNH BÁO: Đang chạy trên CPU! Sẽ rất chậm.")
+    else:
+        print(f"Đang chạy trên GPU: {torch.cuda.get_device_name(0)}")
+        
     # 1. Init Modules
     model = YOLO(config.MODEL_PATH)
     
@@ -26,6 +32,17 @@ def main():
     cap = cv2.VideoCapture(config.VIDEO_PATH)
     mask_img = cv2.imread(config.MASK_PATH, 0)
 
+    ret, first_frame = cap.read()
+    if not ret: return
+    mask_img = utils.resize_mask_to_frame(mask_img, first_frame)
+    
+    # Tạo overlay màu cho mask 1 lần duy nhất để tái sử dụng (Tối ưu hiển thị)
+    mask_overlay = np.zeros_like(first_frame)
+    mask_overlay[mask_img > 127] = [0, 255, 0]
+
+    # Reset lại video về đầu nếu cần, hoặc xử lý tiếp first_frame
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0) 
+    
     frame_count = 0
 
     while cap.isOpened():
@@ -33,14 +50,18 @@ def main():
         if not ret: break
         frame_count += 1
         
-        # Resize frame và Mask (Quan trọng)
-        # Giả sử resize về 1280x720 hoặc giữ nguyên, nếu resize thì nhớ resize mask cho đúng (gt_data.pkl cũng phải tương ứng)
-        # frame = cv2.resize(frame, (960, 540)) 
-        mask_img = utils.resize_mask_to_frame(mask_img, frame)
+        frame = cv2.addWeighted(frame, 1, mask_overlay, 0.3, 0)
 
         # 3. YOLO Tracking (Quan trọng: dùng track thay vì predict)
         # persist=True giúp giữ ID qua các frame
-        results = model.track(frame, classes=config.TARGET_CLASSES, persist=True, verbose=False, tracker="bytetrack.yaml")
+        results = model.track(
+            frame,
+            classes=config.TARGET_CLASSES,
+            persist=True,
+            verbose=False,
+            tracker="bytetrack.yaml",
+            device=device
+        )
 
         # Vẽ Mask lên frame
         colored_mask = np.zeros_like(frame)
@@ -59,10 +80,10 @@ def main():
             for box in boxes:
                 x1, y1, x2, y2 = box
                 cx = (x1 + x2) / 2
-                cy = y2 
+                cy = y2 - (y2 - y1) * 0.05  # Dịch lên trên một chút để lấy chân xe chính xác hơn 
                 bottom_centers.append([cx, cy])
             
-            # Transform sang BEV một lần cho nhanh (Vectorization)
+            # Transform sang BEV (Vectorization)
             points_bev = transformer.transform_points(bottom_centers)
             
             # --- VÒNG LẶP VẼ VÀ TÍNH TOÁN ---
@@ -82,7 +103,7 @@ def main():
                     label += f" | {int(speed)} km/h"
                 
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
 
         cv2.imshow('Traffic Monitor', frame)
         

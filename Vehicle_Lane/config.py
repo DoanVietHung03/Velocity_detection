@@ -18,9 +18,9 @@ MODEL_PATH = os.path.join(PROJECT_ROOT, "Weights", "yolo11n.pt")
 VIDEO_FPS = 25  # Nếu không rõ fps, để mặc định 25  
 
 # 4 điểm hình thang trên video gốc (Source Points)
-SOURCE_POINTS = [[389, 634], [1042, 636], [1265, 783], [449, 783]]
-METERS_PER_PIXEL = 0.05212
+SOURCE_POINTS = [[389, 634], [1044, 638], [1370, 855], [482, 870]]
+METERS_PER_PIXEL = 0.05175
 TARGET_WIDTH = 200
-TARGET_HEIGHT = 197
+TARGET_HEIGHT = 275
 
 TARGET_CLASSES = [2, 3, 5, 7] # Chỉ theo dõi xe: Car, Motorbike, Bus, Truck
