@@ -12,7 +12,7 @@ SESSION_DIR = os.path.join(PROJECT_ROOT, "Video_test", "BrnoCompSpeedSubset", "s
 VIDEO_PATH = os.path.join(SESSION_DIR, "video.avi") 
 MASK_PATH = os.path.join(SESSION_DIR, "video_mask.png")
 DATA_PKL_PATH = os.path.join(SESSION_DIR, "gt_data.pkl")
-MODEL_PATH = os.path.join(PROJECT_ROOT, "Weights", "yolo11n.pt") 
+MODEL_PATH = os.path.join(PROJECT_ROOT, "Weights", "yolo26n.pt") 
 
 # --- CẤU HÌNH MẶC ĐỊNH ---
 VIDEO_FPS = 25  # Nếu không rõ fps, để mặc định 25  
