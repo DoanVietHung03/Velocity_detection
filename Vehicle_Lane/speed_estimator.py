@@ -8,8 +8,8 @@ class SpeedEstimator:
         self.mpp = meters_per_pixel
         
         # Dictionary lưu lịch sử vị trí: {track_id: [ (x, y, frame_count), ... ]}
-        # Chỉ giữ lại buffer ngắn để tính toán (ví dụ 10 frame gần nhất)
-        self.positions = defaultdict(lambda: deque(maxlen=30))
+        # Chỉ giữ lại buffer ngắn để tính toán
+        self.positions = defaultdict(lambda: deque(maxlen=50))
         
         # Lưu tốc độ đã tính để hiển thị cho mượt
         self.speeds = {}

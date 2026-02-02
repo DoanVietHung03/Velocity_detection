@@ -18,10 +18,10 @@ MODEL_PATH = os.path.join(PROJECT_ROOT, "Weights", "yolo11n.pt")
 VIDEO_FPS = 30  
 
 # 4 điểm hình thang trên video gốc (Source Points)
-SOURCE_POINTS = [[413, 633], [1017, 638], [1368, 857], [493, 870]]
-METERS_PER_PIXEL = 0.05035
+SOURCE_POINTS = [[389, 634], [1042, 636], [1265, 783], [449, 783]]
+METERS_PER_PIXEL = 0.05212
 TARGET_WIDTH = 200
-TARGET_HEIGHT = 275
+TARGET_HEIGHT = 197
 
 TARGET_CLASSES = [2, 3, 5, 7] 
 
