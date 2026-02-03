@@ -46,15 +46,14 @@ class SpeedEstimator:
         self.dt = 1.0 / fps
         self.mpp = meters_per_pixel
         
-        # Lưu bộ lọc Kalman cho từng xe
         self.filters = {}
-        # Window lưu trữ vận tốc tức thời để làm mượt
-        self.speed_buffer = defaultdict(lambda: deque(maxlen=15)) 
-        
+        self.ema_speeds = {} 
+        self.alpha = 0.3 # Hệ số làm mượt (0.1 = rất mượt/chậm, 0.9 = rất nhạy/rung)
+
     def update(self, track_id, position_bev, frame_idx):
         x, y = position_bev
         
-        # 1. Khởi tạo hoặc cập nhật Kalman Filter
+        # 1. Kalman Filter (Xử lý nhiễu vị trí)
         if track_id not in self.filters:
             kf = KalmanFilter(dt=self.dt)
             kf.X[0:2] = np.array([[x], [y]])
@@ -65,19 +64,18 @@ class SpeedEstimator:
         kf.predict()
         kf.update([x, y])
         
-        # 2. Lấy vận tốc từ trạng thái của Kalman [vx, vy]
-        # vx, vy ở đây đơn vị là Pixel/Frame hoặc Pixel/Second tùy dt
+        # 2. Tính vận tốc tức thời từ Kalman
         vx = kf.X[2, 0]
         vy = kf.X[3, 0]
-        
-        # Tốc độ pixel/giây
         v_pixel_per_sec = np.sqrt(vx**2 + vy**2)
+        current_speed = (v_pixel_per_sec * self.mpp) * 3.6
         
-        # Đổi sang km/h: (pixel/s * meters/pixel) * 3.6
-        speed_kmh = (v_pixel_per_sec * self.mpp) * 3.6
-        
-        # 3. Sliding Window Average (Làm mượt bước cuối)
-        self.speed_buffer[track_id].append(speed_kmh)
-        smoothed_speed = sum(self.speed_buffer[track_id]) / len(self.speed_buffer[track_id])
-        
-        return smoothed_speed
+        # 3. EMA Smoothing (Xử lý nhiễu tốc độ)
+        if track_id not in self.ema_speeds:
+            self.ema_speeds[track_id] = current_speed
+        else:
+            # Công thức EMA: Speed_mới = alpha * Speed_đo + (1-alpha) * Speed_cũ
+            prev_speed = self.ema_speeds[track_id]
+            self.ema_speeds[track_id] = self.alpha * current_speed + (1 - self.alpha) * prev_speed
+            
+        return self.ema_speeds[track_id]

@@ -37,7 +37,7 @@ def optimize_transform(source_points):
     Chạy vòng lặp để tìm Tỷ lệ khung hình (Aspect Ratio) tốt nhất
     """
     src_pts = np.float32(source_points)
-    target_w = 1000 # Fix chiều rộng
+    target_w = 800 # Fix chiều rộng
     
     best_error = 9999
     best_mpp = 0

@@ -1,1 +1,14 @@
 THIS PROJECT IS ON FIXING PROCESS
+
+There are 2 kind of testing:
+1) With *.pkl and lane_mask image file:
+- This *.pkl file contain all infor about lane segmentation, speed and distance measurement and lane_mask image file is an grouth truth image of lane segmentation to check accuracy of lane segmentation.
+- Run calibration_tool.py to get all infor and save to config.py such as SOURCE_POINTS, TARGET_WIDTH, TARGET_HEIGHT, METERS_PER_PIXEL.
+- Run main.py to test.
+
+2) Without *.pkl and lane_mask image file:
+- You have to know the real size of the road/lane to apply Bird's Eye View (use GG MAPS to get the real size of the road/lane).
+- First, find 4 points of the road/lane on the video -> having SOURCE_POINTS 
+- Second, config TARGET_WIDTH and TARGET_HEIGHT by yourself.
+- Third, calculate METERS_PER_PIXEL using this formula: METERS_PER_PIXEL = real_size_of_the_road / number of pixels in TARGET_WIDTH
+- Run main.py to test.
