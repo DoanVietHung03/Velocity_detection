@@ -37,7 +37,7 @@ def optimize_transform(source_points):
     Chạy vòng lặp để tìm Tỷ lệ khung hình (Aspect Ratio) tốt nhất
     """
     src_pts = np.float32(source_points)
-    target_w = 200 # Fix chiều rộng
+    target_w = 1000 # Fix chiều rộng
     
     best_error = 9999
     best_mpp = 0
@@ -130,7 +130,7 @@ def mouse_callback(event, x, y, flags, param):
                     print("\n--- COPY VÀO CONFIG.PY ---")
                     print(f"SOURCE_POINTS = {clicked_points}")
                     print(f"METERS_PER_PIXEL = {mpp:.5f}")
-                    print(f"TARGET_WIDTH = 200")
+                    print(f"TARGET_WIDTH = {target_w}")
                     print(f"TARGET_HEIGHT = {best_h}")
                     print("--------------------------")
                 else:

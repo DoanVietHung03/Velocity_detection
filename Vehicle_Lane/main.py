@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 from ultralytics import YOLO
 import torch
+from collections import deque
 
 import config
 import utils
@@ -9,51 +10,58 @@ from transformer import ViewTransformer
 from speed_estimator import SpeedEstimator
 
 def main():
+    # 1. Kiểm tra thiết bị phần cứng
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     if device == 'cpu':
         print("CẢNH BÁO: Đang chạy trên CPU! Sẽ rất chậm.")
     else:
         print(f"Đang chạy trên GPU: {torch.cuda.get_device_name(0)}")
         
-    # 1. Init Modules
+    # 2. Khởi tạo các Modules
     model = YOLO(config.MODEL_PATH)
     
-    # Khởi tạo Transformer (Cần điền đúng SOURCE_POINTS trong config.py)
     transformer = ViewTransformer(
         source_points=config.SOURCE_POINTS,
         target_width=config.TARGET_WIDTH,
         target_height=config.TARGET_HEIGHT
     )
     
-    # Khởi tạo bộ ước lượng tốc độ
+    # SpeedEstimator giờ đây đã tích hợp Kalman Filter bên trong
     speed_estimator = SpeedEstimator(fps=config.VIDEO_FPS, meters_per_pixel=config.METERS_PER_PIXEL)
 
-    # 2. Load Video & Mask
+    # 3. Quản lý lịch sử Bounding Box để khử Jitter
+    # Lưu trữ 5 frame gần nhất của mỗi track_id để tính trung bình tọa độ
+    bbox_history = {} 
+
+    # 4. Load Video & Mask
     cap = cv2.VideoCapture(config.VIDEO_PATH)
     mask_img = cv2.imread(config.MASK_PATH, 0)
 
     ret, first_frame = cap.read()
-    if not ret: return
+    if not ret: 
+        print("Lỗi: Không thể đọc video.")
+        return
+        
     mask_img = utils.resize_mask_to_frame(mask_img, first_frame)
     
-    # Tạo overlay màu cho mask 1 lần duy nhất để tái sử dụng (Tối ưu hiển thị)
+    # Tạo overlay màu cho mask (hiển thị vùng nhận diện)
     mask_overlay = np.zeros_like(first_frame)
     mask_overlay[mask_img > 127] = [0, 255, 0]
 
-    # Reset lại video về đầu nếu cần, hoặc xử lý tiếp first_frame
     cap.set(cv2.CAP_PROP_POS_FRAMES, 0) 
-    
     frame_count = 0
+
+    print("--- BẮT ĐẦU XỬ LÝ TRAFFIC MONITOR (OPTIMIZED) ---")
 
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret: break
         frame_count += 1
         
-        frame = cv2.addWeighted(frame, 1, mask_overlay, 0.3, 0)
+        # Hiển thị vùng mask nhẹ trên frame gốc
+        frame_display = cv2.addWeighted(frame, 1, mask_overlay, 0.2, 0)
 
-        # 3. YOLO Tracking (Quan trọng: dùng track thay vì predict)
-        # persist=True giúp giữ ID qua các frame
+        # 5. YOLO Tracking với ByteTrack
         results = model.track(
             frame,
             classes=config.TARGET_CLASSES,
@@ -63,56 +71,74 @@ def main():
             device=device
         )
 
-        # Vẽ Mask lên frame
-        colored_mask = np.zeros_like(frame)
-        colored_mask[mask_img > 127] = [0, 255, 0]
-        frame = cv2.addWeighted(frame, 1, colored_mask, 0.3, 0)
-
         if results[0].boxes.id is not None:
-            # Lấy data từ YOLO
             boxes = results[0].boxes.xyxy.cpu().numpy()
             track_ids = results[0].boxes.id.int().cpu().numpy()
             cls_ids = results[0].boxes.cls.int().cpu().numpy()
             
-            # --- GIAI ĐOẠN TRANSFORMATION ---
-            # Lấy danh sách các điểm đáy của xe (chân xe) để transform
-            bottom_centers = []
-            for box in boxes:
-                x1, y1, x2, y2 = box
-                cx = (x1 + x2) / 2
-                cy = y2 - (y2 - y1) * 0.05  # Dịch lên trên một chút để lấy chân xe chính xác hơn 
-                bottom_centers.append([cx, cy])
+            # --- GIAI ĐOẠN XỬ LÝ TỌA ĐỘ (JITTER REDUCTION) ---
+            current_stable_points = []
+            for box, tid in zip(boxes, track_ids):
+                # Lưu lịch sử 5 frame để làm mượt box
+                if tid not in bbox_history:
+                    bbox_history[tid] = deque(maxlen=5)
+                bbox_history[tid].append(box)
+                
+                # Tính trung bình tọa độ Box (Moving Average)
+                avg_box = np.mean(bbox_history[tid], axis=0)
+                ax1, ay1, ax2, ay2 = avg_box
+                
+                # Lấy điểm chân xe từ Box đã làm mượt
+                cx = (ax1 + ax2) / 2
+                cy = ay2 # Điểm tiếp giáp mặt đất
+                current_stable_points.append([cx, cy])
             
-            # Transform sang BEV (Vectorization)
-            points_bev = transformer.transform_points(bottom_centers)
+            # --- GIAI ĐOẠN BIẾN ĐỔI HÌNH HỌC (BEV) ---
+            points_bev = transformer.transform_points(current_stable_points)
             
-            # --- VÒNG LẶP VẼ VÀ TÍNH TOÁN ---
-            for box, track_id, cls_id, point_bev in zip(boxes, track_ids, cls_ids, points_bev):
-                x1, y1, x2, y2 = map(int, box)
+            # --- GIAI ĐOẠN TÍNH TOÁN VÀ HIỂN THỊ ---
+            for i, (tid, cls_id) in enumerate(zip(track_ids, cls_ids)):
+                # Tọa độ box gốc (để vẽ)
+                x1, y1, x2, y2 = map(int, boxes[i])
+                point_bev = points_bev[i]
                 
-                # A. Kiểm tra làn đường
-                in_lane = utils.is_inside_lane(box, mask_img)
-                color = (0, 0, 255) if in_lane else (255, 0, 0)
+                # A. Kiểm tra xe có trong làn đường/vùng đo không
+                in_lane = utils.is_inside_lane(boxes[i], mask_img)
+                color = (0, 255, 0) if in_lane else (0, 0, 255) # Xanh nếu trong làn, đỏ nếu ngoài
                 
-                # B. Tính tốc độ
-                speed = speed_estimator.update(track_id, point_bev, frame_count)
+                # B. Ước lượng tốc độ (Đã có Kalman Filter & Sliding Window bên trong)
+                speed_kmh = speed_estimator.update(tid, point_bev, frame_count)
                 
-                # C. Hiển thị
-                label = f"ID:{track_id} {model.names[cls_id]}"
-                if in_lane:
-                    label += f" | {int(speed)} km/h"
+                # C. Vẽ Bounding Box và Thông tin
+                label = f"ID:{tid} {model.names[cls_id]}"
+                if in_lane and speed_kmh > 0:
+                    label += f" | {int(speed_kmh)} km/h"
                 
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+                # Vẽ khung xe
+                cv2.rectangle(frame_display, (x1, y1), (x2, y2), color, 2)
+                
+                # Vẽ nền cho chữ để dễ đọc
+                (w, h), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                cv2.rectangle(frame_display, (x1, y1 - 25), (x1 + w, y1), color, -1)
+                cv2.putText(frame_display, label, (x1, y1 - 7), 
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
-        cv2.imshow('Traffic Monitor', frame)
+        # 6. Hiển thị kết quả
+        cv2.imshow('Optimized Traffic Speed Monitor', frame_display)
         
-        # Nhấn 's' để skip nhanh nếu debug
+        # Dọn dẹp bộ nhớ bbox_history cho các ID đã biến mất (Tối ưu RAM)
+        active_ids = set(track_ids) if results[0].boxes.id is not None else set()
+        for tid in list(bbox_history.keys()):
+            if tid not in active_ids and frame_count % 100 == 0: # Kiểm tra mỗi 100 frame
+                del bbox_history[tid]
+
         key = cv2.waitKey(1) & 0xFF
-        if key == ord('q'): break
+        if key == ord('q'): 
+            break
 
     cap.release()
     cv2.destroyAllWindows()
+    print("--- KẾT THÚC ---")
 
 if __name__ == "__main__":
     main()

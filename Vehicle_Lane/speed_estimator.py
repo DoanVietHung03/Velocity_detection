@@ -2,64 +2,82 @@ import math
 from collections import defaultdict, deque
 import numpy as np
 
+class KalmanFilter:
+    """Bộ lọc Kalman đơn giản cho mô hình vận tốc không đổi (Constant Velocity)"""
+    def __init__(self, dt=1/25, process_noise=1e-2, measurement_noise=1e-1):
+        # Trạng thái: [x, y, vx, vy]
+        self.dt = dt
+        self.X = np.zeros((4, 1)) 
+        
+        # Ma trận chuyển trạng thái (F)
+        self.F = np.array([
+            [1, 0, dt, 0],
+            [0, 1, 0, dt],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1]
+        ])
+        
+        # Ma trận đo lường (H) - chỉ đo được vị trí x, y
+        self.H = np.array([
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+        
+        self.P = np.eye(4) * 1000 # Ma trận hiệp phương sai sai số dự đoán
+        self.Q = np.eye(4) * process_noise # Nhiễu hệ thống
+        self.R = np.eye(2) * measurement_noise # Nhiễu đo lường
+
+    def predict(self):
+        self.X = np.dot(self.F, self.X)
+        self.P = np.dot(np.dot(self.F, self.P), self.F.T) + self.Q
+        return self.X
+
+    def update(self, z):
+        # z: Phép đo thực tế [x, y]
+        z = np.array(z).reshape(2, 1)
+        y = z - np.dot(self.H, self.X) # Innovation
+        S = np.dot(self.H, np.dot(self.P, self.H.T)) + self.R
+        K = np.dot(np.dot(self.P, self.H.T), np.linalg.inv(S)) # Kalman Gain
+        self.X = self.X + np.dot(K, y)
+        self.P = self.P - np.dot(np.dot(K, self.H), self.P)
 class SpeedEstimator:
     def __init__(self, fps, meters_per_pixel):
         self.fps = fps
+        self.dt = 1.0 / fps
         self.mpp = meters_per_pixel
         
-        # Dictionary lưu lịch sử vị trí: {track_id: [ (x, y, frame_count), ... ]}
-        # Chỉ giữ lại buffer ngắn để tính toán
-        self.positions = defaultdict(lambda: deque(maxlen=60))
+        # Lưu bộ lọc Kalman cho từng xe
+        self.filters = {}
+        # Window lưu trữ vận tốc tức thời để làm mượt
+        self.speed_buffer = defaultdict(lambda: deque(maxlen=15)) 
         
-        # Lưu tốc độ đã tính để hiển thị cho mượt
-        self.speeds = {}
-
     def update(self, track_id, position_bev, frame_idx):
-        """
-        track_id: ID của xe
-        position_bev: Tọa độ (x, y) sau khi đã transform sang Bird-eye view
-        """
-        if len(self.positions[track_id]) > 0:
-            last_pos, _ = self.positions[track_id][-1]
-            
-            # Alpha càng nhỏ (0.1-0.3) thì càng mượt nhưng trễ (lag)
-            # Alpha càng lớn (0.7-0.9) thì bám sát chuyển động thật nhưng dễ rung
-            alpha_pos = 0.2 
-            smooth_x = last_pos[0] * (1 - alpha_pos) + position_bev[0] * alpha_pos
-            smooth_y = last_pos[1] * (1 - alpha_pos) + position_bev[1] * alpha_pos
-            position_bev = [smooth_x, smooth_y]
+        x, y = position_bev
         
-        self.positions[track_id].append((position_bev, frame_idx))
-
-        sample_gap = int(self.fps / 2) # Lấy mẫu nửa giây
-        
-        # Cần ít nhất 2 điểm dữ liệu để tính tốc độ
-        if len(self.positions[track_id]) < sample_gap:
+        # 1. Khởi tạo hoặc cập nhật Kalman Filter
+        if track_id not in self.filters:
+            kf = KalmanFilter(dt=self.dt)
+            kf.X[0:2] = np.array([[x], [y]])
+            self.filters[track_id] = kf
             return 0
         
-        # Lấy điểm hiện tại và điểm cách đây sample_gap frame (để tránh jitter)
-        current_pos, current_frame = self.positions[track_id][-1]
-        prev_pos, prev_frame = self.positions[track_id][-sample_gap] # Lấy mẫu cách nhau 5 frame
+        kf = self.filters[track_id]
+        kf.predict()
+        kf.update([x, y])
         
-        # Tính khoảng cách Euclidean trong không gian BEV (Pixel)
-        distance_pixels = np.linalg.norm(np.array(current_pos) - np.array(prev_pos))
+        # 2. Lấy vận tốc từ trạng thái của Kalman [vx, vy]
+        # vx, vy ở đây đơn vị là Pixel/Frame hoặc Pixel/Second tùy dt
+        vx = kf.X[2, 0]
+        vy = kf.X[3, 0]
         
-        # Đổi sang mét
-        distance_meters = distance_pixels * self.mpp
+        # Tốc độ pixel/giây
+        v_pixel_per_sec = np.sqrt(vx**2 + vy**2)
         
-        # Tính thời gian (Seconds)
-        time_elapsed = (current_frame - prev_frame) / self.fps
+        # Đổi sang km/h: (pixel/s * meters/pixel) * 3.6
+        speed_kmh = (v_pixel_per_sec * self.mpp) * 3.6
         
-        if time_elapsed == 0: return 0
+        # 3. Sliding Window Average (Làm mượt bước cuối)
+        self.speed_buffer[track_id].append(speed_kmh)
+        smoothed_speed = sum(self.speed_buffer[track_id]) / len(self.speed_buffer[track_id])
         
-        # Tốc độ (m/s) -> km/h
-        speed_ms = distance_meters / time_elapsed
-        speed_kmh = speed_ms * 3.6
-        
-        # Smoothing: Lấy trung bình cộng nhẹ để số không nhảy lung tung
-        if track_id in self.speeds:
-            self.speeds[track_id] = 0.8 * self.speeds[track_id] + 0.2 * speed_kmh
-        else:
-            self.speeds[track_id] = speed_kmh
-            
-        return self.speeds[track_id]
+        return smoothed_speed

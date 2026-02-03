@@ -12,15 +12,15 @@ SESSION_DIR = os.path.join(PROJECT_ROOT, "Video_test", "BrnoCompSpeedSubset", "s
 VIDEO_PATH = os.path.join(SESSION_DIR, "video.avi") 
 MASK_PATH = os.path.join(SESSION_DIR, "video_mask.png")
 DATA_PKL_PATH = os.path.join(SESSION_DIR, "gt_data.pkl")
-MODEL_PATH = os.path.join(PROJECT_ROOT, "Weights", "yolo12n.pt") 
+MODEL_PATH = os.path.join(PROJECT_ROOT, "Weights", "yolo11n.onnx") 
 
 # --- CẤU HÌNH MẶC ĐỊNH ---
 VIDEO_FPS = 25  # Nếu không rõ fps, để mặc định 25  
 
 # 4 điểm hình thang trên video gốc (Source Points)
-SOURCE_POINTS = [[389, 634], [1044, 638], [1370, 855], [482, 870]]
-METERS_PER_PIXEL = 0.05073
-TARGET_WIDTH = 200
-TARGET_HEIGHT = 275
+SOURCE_POINTS = [[390, 634], [1043, 637], [1370, 855], [484, 871]]
+METERS_PER_PIXEL = 0.01036
+TARGET_WIDTH = 1000
+TARGET_HEIGHT = 1375
 
 TARGET_CLASSES = [2, 3, 5, 7] # Chỉ theo dõi xe: Car, Motorbike, Bus, Truck
