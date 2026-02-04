@@ -3,4 +3,5 @@ Video_test/
 Weights/
 __pycache__/
 Docs/
-Distance_cal/
+checkerBoard/
+test_imgs/
