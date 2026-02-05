@@ -5,3 +5,4 @@ __pycache__/
 Docs/
 checkerBoard/
 test_imgs/
+*.csv
