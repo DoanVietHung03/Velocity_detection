@@ -34,4 +34,3 @@
     -> Kết quả: trung bình ~3.44m (sai số trung bình dao động trong khoảng +-30cm)
 - len cam: 0.5m
     -> Kết quả: trung bình ~3.38m (sai số trung bình dao động trong khoảng +-40cm)
-    

@@ -160,7 +160,7 @@ def mouse_event(event, x, y, flags, param):
                 if len(app.clicked_points) == 4:
                     cv2.line(app.clean_frame, app.clicked_points[3], app.clicked_points[0], (0,0,255), 1)
                     
-                    # [TÍNH NĂNG MỚI] Validate Tứ Giác
+                    # Validate Tứ Giác
                     if app.check_valid_convex(app.clicked_points):
                         app.compute_homography()
                         print("\n>>> SETUP XONG. CHẾ ĐỘ ĐO KÍCH HOẠT <<<")
