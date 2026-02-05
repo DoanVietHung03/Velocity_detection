@@ -7,7 +7,7 @@ import json
 import time
 
 # ================= CẤU HÌNH HÌNH HỌC SÀN NHÀ =================
-IMAGE_PATH = '.\\test_imgs\\test_4.jpg'       
+IMAGE_PATH = '.\\test_imgs\\test_5.jpg'       
 CALIB_FILE = 'calibration.json' 
 CSV_FILE_NAME = 'measurement_data.csv'
 
@@ -21,8 +21,8 @@ DIAG_13 = 11.54 # Diagonal
 
 class DistanceApp:
     def __init__(self):
-        self.clicked_points = []     # 4 điểm setup
-        self.measure_points = []     # Danh sách các điểm cần đo (kết quả từ bbox hoặc click)
+        self.clicked_points = []     
+        self.measure_points = []     
         self.matrix_homography = None
         self.scale_px_per_meter = 100 
         
@@ -102,6 +102,13 @@ class DistanceApp:
         ground_x = int((x_min + x_max) / 2)
         ground_y = int(y_max)
         return (ground_x, ground_y), (x_min, y_min, x_max, y_max)
+    
+    # Kiểm tra tứ giác lồi
+    def check_valid_convex(self, points):
+        if len(points) != 4: return False
+        # OpenCV yêu cầu định dạng array shape (N, 1, 2)
+        pts_array = np.array(points, dtype=np.int32).reshape((-1, 1, 2))
+        return cv2.isContourConvex(pts_array)
 
     def compute_homography(self):
         if len(self.clicked_points) < 4: return
@@ -145,14 +152,26 @@ def mouse_event(event, x, y, flags, param):
             if len(app.clicked_points) < 4:
                 app.clicked_points.append((x, y))
                 cv2.circle(app.clean_frame, (x, y), 5, (0, 0, 255), -1)
+                
                 if len(app.clicked_points) > 1:
                     cv2.line(app.clean_frame, app.clicked_points[-2], (x,y), (0,0,255), 1)
+                
+                # Khi đủ 4 điểm: Kiểm tra và tính toán
                 if len(app.clicked_points) == 4:
                     cv2.line(app.clean_frame, app.clicked_points[3], app.clicked_points[0], (0,0,255), 1)
-                    app.compute_homography()
-                    print("\n>>> SETUP XONG. CHẾ ĐỘ ĐO KÍCH HOẠT <<<")
+                    
+                    # [TÍNH NĂNG MỚI] Validate Tứ Giác
+                    if app.check_valid_convex(app.clicked_points):
+                        app.compute_homography()
+                        print("\n>>> SETUP XONG. CHẾ ĐỘ ĐO KÍCH HOẠT <<<")
+                    else:
+                        print("\n[CẢNH BÁO] 4 điểm không tạo thành tứ giác lồi (bị chéo hoặc lõm)!")
+                        print(">> Vui lòng Reset (nhấn 'r') và chọn lại theo thứ tự vòng tròn.")
+                        # Xóa kết nối điểm cuối để người dùng nhận ra lỗi
+                        app.clicked_points = []
+                        app.clean_frame = app.orig_resized.copy() # Reset visual
     else:
-        # --- CHẾ ĐỘ ĐO (THÔNG MINH) ---
+        # --- CHẾ ĐỘ ĐO ---
         if event == cv2.EVENT_LBUTTONDOWN:
             app.drawing = True
             app.ix, app.iy = x, y
@@ -160,37 +179,25 @@ def mouse_event(event, x, y, flags, param):
         elif event == cv2.EVENT_LBUTTONUP:
             if app.drawing: 
                 app.drawing = False
-                
-                # Tính khoảng cách kéo chuột
                 drag_dist = math.hypot(x - app.ix, y - app.iy)
-                
                 final_point = None
                 
-                # TRƯỜNG HỢP 1: KÉO CHUỘT > 10px -> VẼ BBOX
+                # Kéo > 10px -> BBox
                 if drag_dist > 10:
                     ground_pt, bbox = app.get_bbox_ground_point((app.ix, app.iy), (x, y))
                     final_point = ground_pt
-                    
-                    # Vẽ bbox màu xanh lá
                     cv2.rectangle(app.clean_frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0, 255, 0), 2)
-                    # Vẽ điểm chân màu vàng
                     cv2.circle(app.clean_frame, ground_pt, 5, (0, 255, 255), -1)
                     print(f"-> Đã chọn BBox tại {ground_pt}")
-
-                # TRƯỜNG HỢP 2: CLICK (KÉO <= 10px) -> CHẤM ĐIỂM
+                # Click -> Point
                 else:
                     final_point = (x, y)
-                    # Vẽ điểm click màu tím để phân biệt
                     cv2.circle(app.clean_frame, final_point, 5, (255, 0, 255), -1)
-                    # Vẽ vòng tròn bao quanh để dễ nhìn hơn
                     cv2.circle(app.clean_frame, final_point, 9, (255, 0, 255), 1)
                     print(f"-> Đã chấm điểm Point tại {final_point}")
 
-                # Xử lý tính toán sau khi có điểm
                 if final_point:
                     app.measure_points.append(final_point)
-                    
-                    # Cứ mỗi 2 điểm (cặp) thì tính khoảng cách
                     if len(app.measure_points) >= 2 and len(app.measure_points) % 2 == 0:
                         p_start = app.measure_points[-2]
                         p_end = app.measure_points[-1]
@@ -201,17 +208,16 @@ def mouse_event(event, x, y, flags, param):
                         mid_y = (p_start[1] + p_end[1]) // 2
                         cv2.putText(app.clean_frame, f"{dist:.2f}m", (mid_x, mid_y - 10), 
                                     cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 165, 255), 2, cv2.LINE_AA)
-                        
                         app.save_csv(p_start, p_end, dist)
 
 def main():
     img_undistorted = app.load_calibration_and_undistort(IMAGE_PATH)
     if img_undistorted is None: return
 
-    h, w = img_undistorted.shape[:2]
-    TARGET_W = 1000 
-    scale = TARGET_W / w
-    new_h = int(h * scale)
+    h_orig, w_orig = img_undistorted.shape[:2]
+    TARGET_W = 1200 
+    scale = TARGET_W / w_orig
+    new_h = int(h_orig * scale)
     
     app.orig_resized = cv2.resize(img_undistorted, (TARGET_W, new_h))
     app.clean_frame = app.orig_resized.copy()
@@ -219,10 +225,7 @@ def main():
     print(f"Ảnh làm việc: {TARGET_W}x{new_h}")
     print("\n--- HƯỚNG DẪN SỬ DỤNG ---")
     print("1. SETUP: Click 4 điểm góc sàn.")
-    print("2. ĐO KHOẢNG CÁCH (Hỗ trợ 2 cách):")
-    print("   - Cách A (Vật thể): Kéo chuột tạo hộp -> Lấy điểm chân.")
-    print("   - Cách B (Điểm): Click chuột tại chỗ -> Lấy điểm đó.")
-    print("   (Có thể kết hợp: Kéo hộp Người -> Click điểm Cột mốc).")
+    print("2. ĐO KHOẢNG CÁCH (Kéo BBox hoặc Click điểm).")
     print("3. Phím 'r': Reset. Phím 'q': Thoát.")
 
     cv2.namedWindow("Smart Distance")
@@ -231,15 +234,48 @@ def main():
     while True:
         img_show = app.clean_frame.copy()
 
-        # Chỉ vẽ preview hình chữ nhật nếu người dùng đang KÉO chuột xa hơn 10px
-        # Để tránh hiển thị hộp rác khi người dùng chỉ định click điểm
+        # 1. Vẽ BBox Preview (nếu đang kéo chuột)
         if app.drawing and app.cur_mouse != (-1, -1):
             drag_dist_preview = math.hypot(app.cur_mouse[0] - app.ix, app.cur_mouse[1] - app.iy)
             if drag_dist_preview > 10:
                 cv2.rectangle(img_show, (app.ix, app.iy), app.cur_mouse, (0, 255, 0), 2)
             else:
-                # Nếu đang nhấn mà chưa kéo, hiển thị dấu cộng nhỏ để biết đang nhắm
                 cv2.drawMarker(img_show, app.cur_mouse, (0, 255, 0), markerType=cv2.MARKER_CROSS, markerSize=10)
+        
+        # 2. VẼ KÍNH LÚP (ZOOM WINDOW) KHI SETUP
+        # Chỉ hiện khi chưa tính Homography và chuột đang trong cửa sổ
+        if app.matrix_homography is None and app.cur_mouse != (-1, -1):
+            mx, my = app.cur_mouse
+            zoom_factor = 4      # Phóng to 4 lần
+            crop_sz = 40         # Vùng cắt quanh chuột (40x40 px)
+            
+            # Giới hạn vùng cắt không vượt quá ảnh
+            x1 = max(0, mx - crop_sz)
+            y1 = max(0, my - crop_sz)
+            x2 = min(TARGET_W, mx + crop_sz)
+            y2 = min(new_h, my + crop_sz)
+            
+            roi = app.clean_frame[y1:y2, x1:x2]
+            
+            if roi.size > 0:
+                # Phóng to ROI (Interpolation Nearest để giữ độ nét pixel)
+                zoomed = cv2.resize(roi, (0,0), fx=zoom_factor, fy=zoom_factor, interpolation=cv2.INTER_NEAREST)
+                
+                # Vẽ tâm chữ thập lên kính lúp
+                zh, zw = zoomed.shape[:2]
+                cv2.line(zoomed, (zw//2, 0), (zw//2, zh), (0, 0, 255), 1)
+                cv2.line(zoomed, (0, zh//2), (zw, zh//2), (0, 0, 255), 1)
+                
+                # Viền cho kính lúp
+                cv2.rectangle(zoomed, (0,0), (zw-1, zh-1), (255, 255, 255), 2)
+                
+                # Dán kính lúp vào góc Phải-Trên (Top-Right) màn hình để không che chuột
+                # (Cách lề 20px)
+                margin = 20
+                if zw < TARGET_W and zh < new_h:
+                    img_show[margin:margin+zh, TARGET_W-margin-zw:TARGET_W-margin] = zoomed
+                    cv2.putText(img_show, "ZOOM 4x", (TARGET_W-margin-zw, margin-5), 
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
         cv2.imshow("Smart Distance", img_show)
         key = cv2.waitKey(1)
